@@ -1,0 +1,10 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import NewBookmark from "../../ui/NewBookmark.tsx";
+const url = Astro.url.searchParams.get('url') || '';
+---
+<BaseLayout title="Nuevo marcador">
+  <main class="max-w-xl mx-auto p-4">
+    <NewBookmark client:load url={url} />
+  </main>
+</BaseLayout>

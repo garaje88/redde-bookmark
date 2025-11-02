@@ -1,0 +1,23 @@
+# Node
+node_modules
+# Builds
+dist
+.build
+# Env
+.env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+.claude
+ADD_LINK_MODAL.md
+CLAUDE.md
+COLLECTIONS_FEATURE.md
+COLLECTIONS_FIX.md
+UI_FINAL_CHANGES.md
+UI_IMPROVEMENTS.md
+VITE_REACT_ERROR_FIX.md
+
+

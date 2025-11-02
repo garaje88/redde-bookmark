@@ -1,0 +1,17 @@
+{
+  "name": "redde-monorepo",
+  "private": true,
+  "workspaces": [],
+  "scripts": {
+    "deploy": "firebase deploy",
+    "emulators": "firebase emulators:start",
+    "import:netscape": "node tools/import-bookmarks.mjs --format netscape",
+    "import:json": "node tools/import-bookmarks.mjs --format json",
+    "export:json": "node tools/export-bookmarks.mjs --format json",
+    "export:netscape": "node tools/export-bookmarks.mjs --format netscape"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.5.0",
+    "yargs": "^17.7.2"
+  }
+}

@@ -1,0 +1,45 @@
+---
+const { title = 'Redde Bookmark', description = 'Guarda y organiza tus enlaces favoritos' } = Astro.props;
+---
+<html lang="es" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+
+    {/* Favicon */}
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png" />
+
+    {/* PWA Manifest */}
+    <link rel="manifest" href="/manifest.json" />
+
+    {/* Theme Color */}
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Redde" />
+
+    {/* Open Graph / Facebook */}
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content="/assets/icons/android-chrome-512x512.png" />
+
+    {/* Twitter */}
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content="/assets/icons/android-chrome-512x512.png" />
+
+    <title>{title}</title>
+  </head>
+  <body class="min-h-screen w-full bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100 overflow-x-hidden">
+    <style is:global>
+      @import "/src/styles/global.css";
+    </style>
+    <slot />
+  </body>
+</html>
