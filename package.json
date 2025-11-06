@@ -3,7 +3,9 @@
   "private": true,
   "workspaces": [],
   "scripts": {
+    "build": "cd apps/web && npm run build",
     "deploy": "firebase deploy",
+    "deploy:cloudflare": "npx wrangler pages deploy apps/web/dist --project-name=redde-bookmark",
     "emulators": "firebase emulators:start",
     "import:netscape": "node tools/import-bookmarks.mjs --format netscape",
     "import:json": "node tools/import-bookmarks.mjs --format json",
