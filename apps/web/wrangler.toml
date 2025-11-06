@@ -1,11 +1,7 @@
 name = "redde-bookmark"
 compatibility_date = "2025-11-02"
-
-[site]
-bucket = "./dist"
-
-# Pages configuration
-pages_build_output_dir = "./dist"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".vercel/output/static"
 
 # Optional: Environment variables (can be configured in Cloudflare dashboard)
 # [vars]
