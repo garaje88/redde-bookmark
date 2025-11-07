@@ -1,5 +1,0 @@
-name = "redde-bookmark"
-compatibility_date = "2025-11-02"
-
-# Cloudflare Pages configuration
-pages_build_output_dir = "apps/web/dist"

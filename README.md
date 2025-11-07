@@ -63,12 +63,30 @@ Ajusta `.firebaserc` con tu `projectId`:
 
 ---
 
-## CI/CD con GitHub Actions
+## Despliegue
+
+### Opción 1: Cloudflare Pages (Recomendado para hosting estático)
+
+El proyecto está configurado para desplegarse en Cloudflare Pages. Ver guía completa en [DEPLOYMENT.md](DEPLOYMENT.md).
+
+**Quick Start:**
+```bash
+cd apps/web
+npm run deploy  # Deploy manual con Wrangler CLI
+```
+
+O conecta tu repositorio Git a Cloudflare Pages con estas configuraciones:
+- **Build command**: `npm run build`
+- **Build output directory**: `apps/web/dist`
+- **Environment variables**: Ver [DEPLOYMENT.md](DEPLOYMENT.md)
+
+### Opción 2: Firebase Hosting
+
 Incluye `.github/workflows/firebase-deploy.yml` que despliega automáticamente a Firebase al hacer push a `main`.
 
-### Secrets requeridos
-- `FIREBASE_PROJECT_ID`: ID del proyecto Firebase (p.ej. `redde-prod`).
-- `FIREBASE_TOKEN`: Token de Firebase CLI (genera con `firebase login:ci`).
+**Secrets requeridos:**
+- `FIREBASE_PROJECT_ID`: ID del proyecto Firebase (p.ej. `redde-prod`)
+- `FIREBASE_TOKEN`: Token de Firebase CLI (genera con `firebase login:ci`)
 
 > Alternativa: puedes usar Workload Identity/Service Account con `google-github-actions/auth`, pero el flujo anterior es el más simple para arrancar.
 

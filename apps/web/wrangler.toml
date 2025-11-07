@@ -1,12 +1,9 @@
 name = "redde-bookmark"
-compatibility_date = "2025-11-02"
-compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = ".vercel/output/static"
+compatibility_date = "2025-11-07"
 
-# Optional: Environment variables (can be configured in Cloudflare dashboard)
+# Static site configuration
+pages_build_output_dir = "./dist"
+
+# Optional: Add environment variables here or in Cloudflare dashboard
 # [vars]
 # PUBLIC_FB_API_KEY = ""
-# PUBLIC_FB_AUTH_DOMAIN = ""
-# PUBLIC_FB_PROJECT_ID = ""
-# PUBLIC_FB_STORAGE_BUCKET = ""
-# PUBLIC_FB_APP_ID = ""

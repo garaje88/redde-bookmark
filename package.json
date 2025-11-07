@@ -15,5 +15,8 @@
   "dependencies": {
     "firebase-admin": "^12.5.0",
     "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "wrangler": "^4.46.0"
   }
 }

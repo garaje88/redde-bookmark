@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "preview:cloudflare": "astro build && wrangler pages dev ./dist",
+    "deploy": "astro build && wrangler pages deploy ./dist"
   },
   "dependencies": {
     "@astrojs/react": "^4.4.0",
@@ -14,5 +16,8 @@
     "firebase": "^10.12.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.46.0"
   }
 }
