@@ -21,6 +21,7 @@ export interface Collection {
   description?: string;
   color?: string;
   icon?: string;
+  parentId?: string;  // ID de la colección padre (si es subcolección)
   owner: string;
   createdAt: any;
   updatedAt: any;

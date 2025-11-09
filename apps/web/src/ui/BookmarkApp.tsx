@@ -11,7 +11,9 @@ import Sidebar from '../components/Sidebar';
 import AddLinkModal from '../components/AddLinkModal';
 import CollectionModal from '../components/CollectionModal';
 import EditLinkModal from '../components/EditLinkModal';
+import CollectionManager from '../components/CollectionManager';
 import DashboardStats from '../components/DashboardStats';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function BookmarkApp() {
   const [user, setUser] = useState<User | null>(null);
@@ -20,14 +22,20 @@ export default function BookmarkApp() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showCollectionModal, setShowCollectionModal] = useState(false);
+  const [showCollectionManager, setShowCollectionManager] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
+  const [editingCollection, setEditingCollection] = useState<Collection | null>(null);
   const [showFabMenu, setShowFabMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
-  const [activeView, setActiveView] = useState<'home' | 'links' | 'pinned' | 'collection'>('home');
+  const [activeView, setActiveView] = useState<'home' | 'links' | 'pinned' | 'collection' | 'collections'>('home');
   const [activeCollection, setActiveCollection] = useState<string | undefined>();
   const [activeTag, setActiveTag] = useState<string | undefined>();
+  const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
+  const [preselectedCollectionId, setPreselectedCollectionId] = useState<string | undefined>();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [collectionToDelete, setCollectionToDelete] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => onAuthStateChanged(auth, setUser), []);
 
@@ -150,6 +158,7 @@ export default function BookmarkApp() {
     name: string;
     description: string;
     color: string;
+    parentId?: string;
   }) {
     if (!user) return;
 
@@ -157,11 +166,34 @@ export default function BookmarkApp() {
       name: data.name,
       description: data.description,
       color: data.color,
+      parentId: data.parentId || null,
       icon: '📁',
       owner: user.uid,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
+  }
+
+  async function handleUpdateCollection(id: string, data: {
+    name: string;
+    description: string;
+    color: string;
+    parentId?: string;
+  }) {
+    if (!user) return;
+
+    await updateDoc(doc(db, `users/${user.uid}/collections`, id), {
+      name: data.name,
+      description: data.description,
+      color: data.color,
+      parentId: data.parentId || null,
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  async function handleDeleteCollection(id: string) {
+    if (!user) return;
+    await deleteDoc(doc(db, `users/${user.uid}/collections`, id));
   }
 
   async function deleteBookmark(id: string) {
@@ -211,6 +243,7 @@ export default function BookmarkApp() {
   const getHeaderTitle = () => {
     if (activeView === 'pinned') return 'Anclados';
     if (activeView === 'links') return 'Todos los Links';
+    if (activeView === 'collections') return 'Colecciones';
     if (activeView === 'collection' && activeCollection) {
       const col = collections.find(c => c.id === activeCollection);
       return col?.name || 'Colección';
@@ -310,6 +343,11 @@ export default function BookmarkApp() {
         }}
         onPinnedClick={() => {
           setActiveView('pinned');
+          setActiveCollection(undefined);
+          setActiveTag(undefined);
+        }}
+        onManageCollectionsClick={() => {
+          setActiveView('collections');
           setActiveCollection(undefined);
           setActiveTag(undefined);
         }}
@@ -527,8 +565,404 @@ export default function BookmarkApp() {
             </>
           )}
 
+          {/* Collections View */}
+          {activeView === 'collections' && (
+            <>
+              <div className="flex items-center justify-between mb-5">
+                <h1 className="text-xl font-semibold text-white flex items-center gap-2">
+                  <svg className="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  Collections
+                </h1>
+                <span className="text-sm text-zinc-500">{collections.length} collections</span>
+              </div>
+
+              {collections.length > 0 ? (
+                <div className="flex gap-4 overflow-x-auto pb-4">
+                  {collections
+                    .filter(c => !c.parentId) // Solo colecciones principales
+                    .map((mainCollection) => {
+                      const mainBookmarks = bookmarks.filter(b => b.collectionId === mainCollection.id);
+                      const level1Subs = collections.filter(c => c.parentId === mainCollection.id);
+
+                      return (
+                        <div
+                          key={mainCollection.id}
+                          className="flex-shrink-0 w-80 bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 flex flex-col"
+                          style={{ height: 'calc(100vh - 180px)', maxHeight: 'calc(100vh - 180px)' }}
+                        >
+                          {/* Main Collection Header */}
+                          <div className="mb-4 border-b border-zinc-800 pb-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <div
+                                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                                style={{ backgroundColor: mainCollection.color || '#6366f1' }}
+                              >
+                                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                                </svg>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setActiveView('collection');
+                                  setActiveCollection(mainCollection.id);
+                                }}
+                                className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
+                              >
+                                <h3 className="font-medium text-zinc-100 truncate cursor-pointer">{mainCollection.name}</h3>
+                                {mainCollection.description && (
+                                  <p className="text-xs text-zinc-500 truncate">{mainCollection.description}</p>
+                                )}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setActiveView('collection');
+                                  setActiveCollection(mainCollection.id);
+                                }}
+                                className="text-zinc-400 hover:text-zinc-200"
+                                title="View collection"
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
+                              </button>
+                            </div>
+                            {/* Action buttons */}
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => {
+                                  setPreselectedCollectionId(mainCollection.id);
+                                  setShowAddModal(true);
+                                }}
+                                className="flex-1 px-2 py-1 text-xs bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded transition-colors flex items-center justify-center gap-1"
+                                title="Create link"
+                              >
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                </svg>
+                                Link
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingCollection(mainCollection);
+                                  setShowCollectionModal(true);
+                                }}
+                                className="px-2 py-1 text-xs bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400 rounded transition-colors"
+                                title="Edit"
+                              >
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setCollectionToDelete({ id: mainCollection.id, name: mainCollection.name });
+                                  setShowDeleteConfirm(true);
+                                }}
+                                className="px-2 py-1 text-xs bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded transition-colors"
+                                title="Delete"
+                              >
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Scrollable Content */}
+                          <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+                            {/* Level 1 Subcollections */}
+                            {level1Subs.map((sub1) => {
+                              const sub1Bookmarks = bookmarks.filter(b => b.collectionId === sub1.id);
+                              const level2Subs = collections.filter(c => c.parentId === sub1.id);
+                              const isExpanded = expandedCollections.has(sub1.id);
+
+                              return (
+                                <div key={sub1.id} className="border-l-2 border-zinc-700 pl-3">
+                                  <div className="flex items-center gap-1 mb-2">
+                                    <button
+                                      onClick={() => {
+                                        const newExpanded = new Set(expandedCollections);
+                                        if (newExpanded.has(sub1.id)) {
+                                          newExpanded.delete(sub1.id);
+                                        } else {
+                                          newExpanded.add(sub1.id);
+                                        }
+                                        setExpandedCollections(newExpanded);
+                                      }}
+                                      className="text-zinc-500 hover:text-zinc-300 flex-shrink-0"
+                                    >
+                                      <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                      </svg>
+                                    </button>
+                                    <div
+                                      className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0"
+                                      style={{ backgroundColor: sub1.color || '#6366f1' }}
+                                    >
+                                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                                      </svg>
+                                    </div>
+                                    <button
+                                      onClick={() => {
+                                        setActiveView('collection');
+                                        setActiveCollection(sub1.id);
+                                      }}
+                                      className="text-sm font-medium text-zinc-200 truncate flex-1 text-left hover:text-white transition-colors cursor-pointer"
+                                    >
+                                      {sub1.name}
+                                    </button>
+                                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button
+                                        onClick={() => {
+                                          setPreselectedCollectionId(sub1.id);
+                                          setShowAddModal(true);
+                                        }}
+                                        className="p-1 text-blue-400 hover:bg-blue-600/20 rounded"
+                                        title="Create link"
+                                      >
+                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                        </svg>
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setEditingCollection(sub1);
+                                          setShowCollectionModal(true);
+                                        }}
+                                        className="p-1 text-yellow-400 hover:bg-yellow-600/20 rounded"
+                                        title="Edit"
+                                      >
+                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setCollectionToDelete({ id: sub1.id, name: sub1.name });
+                                          setShowDeleteConfirm(true);
+                                        }}
+                                        className="p-1 text-red-400 hover:bg-red-600/20 rounded"
+                                        title="Delete"
+                                      >
+                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                    <button
+                                      onClick={() => {
+                                        setActiveView('collection');
+                                        setActiveCollection(sub1.id);
+                                      }}
+                                      className="text-zinc-500 hover:text-zinc-300"
+                                      title="View collection"
+                                    >
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                      </svg>
+                                    </button>
+                                  </div>
+
+                                  {/* Level 2 Subcollections */}
+                                  {isExpanded && level2Subs.length > 0 && (
+                                    <div className="ml-4 space-y-2 mb-2">
+                                      {level2Subs.map((sub2) => {
+                                        const sub2Bookmarks = bookmarks.filter(b => b.collectionId === sub2.id);
+                                        return (
+                                          <div key={sub2.id} className="border-l border-zinc-700 pl-2 group">
+                                            <div className="flex items-center gap-1 mb-1">
+                                              <div
+                                                className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
+                                                style={{ backgroundColor: sub2.color || '#6366f1' }}
+                                              >
+                                                <svg className="w-2 h-2 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                                                </svg>
+                                              </div>
+                                              <button
+                                                onClick={() => {
+                                                  setActiveView('collection');
+                                                  setActiveCollection(sub2.id);
+                                                }}
+                                                className="text-xs text-zinc-300 truncate flex-1 text-left hover:text-white transition-colors cursor-pointer"
+                                              >
+                                                {sub2.name}
+                                              </button>
+                                              <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button
+                                                  onClick={() => {
+                                                    setPreselectedCollectionId(sub2.id);
+                                                    setShowAddModal(true);
+                                                  }}
+                                                  className="p-0.5 text-blue-400 hover:bg-blue-600/20 rounded"
+                                                  title="Create link"
+                                                >
+                                                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                  </svg>
+                                                </button>
+                                                <button
+                                                  onClick={() => {
+                                                    setEditingCollection(sub2);
+                                                    setShowCollectionModal(true);
+                                                  }}
+                                                  className="p-0.5 text-yellow-400 hover:bg-yellow-600/20 rounded"
+                                                  title="Edit"
+                                                >
+                                                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                  </svg>
+                                                </button>
+                                                <button
+                                                  onClick={() => {
+                                                    setCollectionToDelete({ id: sub2.id, name: sub2.name });
+                                                    setShowDeleteConfirm(true);
+                                                  }}
+                                                  className="p-0.5 text-red-400 hover:bg-red-600/20 rounded"
+                                                  title="Delete"
+                                                >
+                                                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                  </svg>
+                                                </button>
+                                              </div>
+                                              <button
+                                                onClick={() => {
+                                                  setActiveView('collection');
+                                                  setActiveCollection(sub2.id);
+                                                }}
+                                                className="text-zinc-500 hover:text-zinc-300"
+                                                title="View collection"
+                                              >
+                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                </svg>
+                                              </button>
+                                            </div>
+
+                                            {/* Level 2 Links */}
+                                            {sub2Bookmarks.length > 0 && (
+                                              <div className="ml-4 space-y-1">
+                                                {sub2Bookmarks.slice(0, 3).map((bookmark) => (
+                                                  <button
+                                                    key={bookmark.id}
+                                                    onClick={() => window.open(bookmark.url, '_blank')}
+                                                    className="w-full flex items-center gap-2 px-1.5 py-1 rounded text-xs text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-all"
+                                                  >
+                                                    <img
+                                                      src={bookmark.faviconUrl}
+                                                      alt=""
+                                                      className="w-3 h-3 flex-shrink-0"
+                                                      onError={(e) => {
+                                                        e.currentTarget.style.display = 'none';
+                                                      }}
+                                                    />
+                                                    <span className="truncate flex-1 text-left">{bookmark.title}</span>
+                                                  </button>
+                                                ))}
+                                                {sub2Bookmarks.length > 3 && (
+                                                  <p className="text-xs text-zinc-600 ml-1.5">+{sub2Bookmarks.length - 3} more</p>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+
+                                  {/* Level 1 Links */}
+                                  {isExpanded && sub1Bookmarks.length > 0 && (
+                                    <div className="ml-4 space-y-1">
+                                      {sub1Bookmarks.slice(0, 4).map((bookmark) => (
+                                        <button
+                                          key={bookmark.id}
+                                          onClick={() => window.open(bookmark.url, '_blank')}
+                                          className="w-full flex items-center gap-2 px-1.5 py-1 rounded text-xs text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-all"
+                                        >
+                                          <img
+                                            src={bookmark.faviconUrl}
+                                            alt=""
+                                            className="w-3 h-3 flex-shrink-0"
+                                            onError={(e) => {
+                                              e.currentTarget.style.display = 'none';
+                                            }}
+                                          />
+                                          <span className="truncate flex-1 text-left">{bookmark.title}</span>
+                                        </button>
+                                      ))}
+                                      {sub1Bookmarks.length > 4 && (
+                                        <p className="text-xs text-zinc-600 ml-1.5">+{sub1Bookmarks.length - 4} more</p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+
+                            {/* Main Collection Links */}
+                            {mainBookmarks.length > 0 && (
+                              <div className="space-y-1">
+                                {mainBookmarks.slice(0, 5).map((bookmark) => (
+                                  <button
+                                    key={bookmark.id}
+                                    onClick={() => window.open(bookmark.url, '_blank')}
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-all"
+                                  >
+                                    <img
+                                      src={bookmark.faviconUrl}
+                                      alt=""
+                                      className="w-3 h-3 flex-shrink-0"
+                                      onError={(e) => {
+                                        e.currentTarget.style.display = 'none';
+                                      }}
+                                    />
+                                    <span className="truncate flex-1 text-left">{bookmark.title}</span>
+                                  </button>
+                                ))}
+                                {mainBookmarks.length > 5 && (
+                                  <p className="text-xs text-zinc-600 px-2">+{mainBookmarks.length - 5} more</p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              ) : (
+                <div className="text-center py-20 border border-dashed border-zinc-800 rounded-lg">
+                  <div className="w-12 h-12 bg-zinc-900 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-6 h-6 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                  </div>
+                  <p className="text-sm text-zinc-500 mb-1">No collections</p>
+                  <p className="text-xs text-zinc-600">Create your first collection to get started</p>
+                </div>
+              )}
+
+              {/* Floating Action Button */}
+              <button
+                onClick={() => {
+                  setEditingCollection(null);
+                  setShowCollectionModal(true);
+                }}
+                className="fixed bottom-6 right-6 w-14 h-14 bg-purple-600 hover:bg-purple-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-30"
+                title="Create New Collection"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+            </>
+          )}
+
           {/* Other Views (Links, Pinned, Collection, Tag filtered) */}
-          {activeView !== 'home' && (
+          {activeView !== 'home' && activeView !== 'collections' && (
             <>
               <div className="flex items-center justify-between mb-5">
                 <h1 className="text-xl font-semibold text-white">{getHeaderTitle()}</h1>
@@ -604,17 +1038,42 @@ export default function BookmarkApp() {
       {/* Add Link Modal */}
       <AddLinkModal
         isOpen={showAddModal}
-        onClose={() => setShowAddModal(false)}
+        onClose={() => {
+          setShowAddModal(false);
+          setPreselectedCollectionId(undefined);
+        }}
         onSubmit={handleCreateBookmark}
         collections={collections}
         existingTags={tags.map(t => t.name)}
+        preselectedCollectionId={preselectedCollectionId}
       />
 
       {/* Collection Modal */}
       <CollectionModal
         isOpen={showCollectionModal}
-        onClose={() => setShowCollectionModal(false)}
-        onSubmit={handleCreateCollection}
+        onClose={() => {
+          setShowCollectionModal(false);
+          setEditingCollection(null);
+        }}
+        onSubmit={async (data) => {
+          if (editingCollection) {
+            await handleUpdateCollection(editingCollection.id, data);
+          } else {
+            await handleCreateCollection(data);
+          }
+        }}
+        collections={collections}
+        collection={editingCollection}
+      />
+
+      {/* Collection Manager */}
+      <CollectionManager
+        isOpen={showCollectionManager}
+        onClose={() => setShowCollectionManager(false)}
+        collections={collections}
+        onCreateCollection={handleCreateCollection}
+        onUpdateCollection={handleUpdateCollection}
+        onDeleteCollection={handleDeleteCollection}
       />
 
       {/* Edit Link Modal */}
@@ -628,6 +1087,25 @@ export default function BookmarkApp() {
         bookmark={editingBookmark}
         collections={collections}
         existingTags={tags.map(t => t.name)}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        onClose={() => {
+          setShowDeleteConfirm(false);
+          setCollectionToDelete(null);
+        }}
+        onConfirm={async () => {
+          if (collectionToDelete) {
+            await handleDeleteCollection(collectionToDelete.id);
+          }
+        }}
+        title="Delete Collection"
+        message={`Are you sure you want to delete "${collectionToDelete?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        isDangerous={true}
       />
 
       {/* Mobile Sidebar Overlay */}

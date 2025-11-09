@@ -12,6 +12,7 @@ interface SidebarProps {
   onHomeClick: () => void;
   onLinksClick: () => void;
   onPinnedClick: () => void;
+  onManageCollectionsClick: () => void;
 }
 
 export default function Sidebar({
@@ -24,11 +25,94 @@ export default function Sidebar({
   onTagClick,
   onHomeClick,
   onLinksClick,
-  onPinnedClick
+  onPinnedClick,
+  onManageCollectionsClick
 }: SidebarProps) {
   const [collectionsOpen, setCollectionsOpen] = useState(true);
   const [tagsOpen, setTagsOpen] = useState(true);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
+
+  // Construir jerarquía de colecciones
+  interface CollectionNode extends Collection {
+    children: CollectionNode[];
+    level: number;
+  }
+
+  const buildCollectionTree = (): CollectionNode[] => {
+    const buildNode = (parentId: string | undefined, level: number = 0): CollectionNode[] => {
+      return collections
+        .filter(c => c.parentId === parentId)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(c => ({
+          ...c,
+          level,
+          children: buildNode(c.id, level + 1)
+        }));
+    };
+    return buildNode(undefined);
+  };
+
+  const collectionTree = buildCollectionTree();
+
+  const toggleCollectionExpand = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newExpanded = new Set(expandedCollections);
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id);
+    } else {
+      newExpanded.add(id);
+    }
+    setExpandedCollections(newExpanded);
+  };
+
+  const renderCollectionTree = (nodes: CollectionNode[]): JSX.Element[] => {
+    return nodes.flatMap(node => {
+      const hasChildren = node.children.length > 0;
+      const isExpanded = expandedCollections.has(node.id);
+      const elements: JSX.Element[] = [];
+
+      elements.push(
+        <button
+          key={node.id}
+          onClick={() => onCollectionClick(node.id)}
+          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all text-sm ${
+            activeCollection === node.id
+              ? 'bg-zinc-800/70 text-white'
+              : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+          }`}
+          style={{ paddingLeft: `${node.level * 12 + 8}px` }}
+        >
+          {hasChildren && (
+            <svg
+              onClick={(e) => toggleCollectionExpand(node.id, e)}
+              className={`w-3 h-3 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-0' : '-rotate-90'}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          )}
+          {!hasChildren && <div className="w-3" />}
+          <div
+            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+            style={{ backgroundColor: node.color || '#6366f1' }}
+          />
+          <span className="truncate flex-1 text-left text-xs">{node.name}</span>
+          <span className="text-xs text-zinc-600">
+            {collectionCounts[node.id] || 0}
+          </span>
+        </button>
+      );
+
+      if (hasChildren && isExpanded) {
+        elements.push(...renderCollectionTree(node.children));
+      }
+
+      return elements;
+    });
+  };
 
   return (
     <aside className={`${isCollapsed ? 'w-16' : 'w-52'} bg-black border-r-2 border-zinc-700/50 h-screen overflow-y-auto flex-shrink-0 hidden lg:block transition-all duration-300 sticky top-0`}>
@@ -111,6 +195,18 @@ export default function Sidebar({
             </svg>
             {!isCollapsed && <span>Pinned</span>}
           </button>
+
+          <button
+            onClick={onManageCollectionsClick}
+            className={`w-full flex items-center ${isCollapsed ? 'justify-center' : 'gap-2.5'} px-2 py-2 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 rounded-md transition-colors`}
+            title={isCollapsed ? "Manage Collections" : ""}
+          >
+            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            {!isCollapsed && <span>Collections</span>}
+          </button>
         </nav>
 
         {/* Scrollable content area */}
@@ -135,26 +231,7 @@ export default function Sidebar({
 
             {collectionsOpen && (
               <div className="space-y-0.5">
-                {collections.map((collection) => (
-                  <button
-                    key={collection.id}
-                    onClick={() => onCollectionClick(collection.id)}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all text-sm ${
-                      activeCollection === collection.id
-                        ? 'bg-zinc-800/70 text-white'
-                        : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
-                    }`}
-                  >
-                    <div
-                      className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: collection.color || '#6366f1' }}
-                    />
-                    <span className="truncate flex-1 text-left text-xs">{collection.name}</span>
-                    <span className="text-xs text-zinc-600">
-                      {collectionCounts[collection.id] || 0}
-                    </span>
-                  </button>
-                ))}
+                {renderCollectionTree(collectionTree)}
               </div>
             )}
           </div>

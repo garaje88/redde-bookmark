@@ -13,6 +13,7 @@ interface AddLinkModalProps {
   }) => Promise<void>;
   collections: Collection[];
   existingTags: string[];
+  preselectedCollectionId?: string;
 }
 
 export default function AddLinkModal({
@@ -20,7 +21,8 @@ export default function AddLinkModal({
   onClose,
   onSubmit,
   collections,
-  existingTags
+  existingTags,
+  preselectedCollectionId
 }: AddLinkModalProps) {
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
@@ -33,7 +35,38 @@ export default function AddLinkModal({
   const [showOptions, setShowOptions] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Reset form when modal closes
+  // Organizar colecciones en jerarquía
+  const getCollectionHierarchy = () => {
+    interface CollectionWithLevel extends Collection {
+      level: number;
+      path: string;
+    }
+
+    const result: CollectionWithLevel[] = [];
+    const buildHierarchy = (parentId: string | undefined | null, level: number, parentPath: string = '') => {
+      collections
+        .filter(c => {
+          // Handle both null and undefined for top-level collections
+          if (parentId === undefined || parentId === null) {
+            return c.parentId === undefined || c.parentId === null;
+          }
+          return c.parentId === parentId;
+        })
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .forEach(c => {
+          const path = parentPath ? `${parentPath} > ${c.name}` : c.name;
+          result.push({ ...c, level, path });
+          buildHierarchy(c.id, level + 1, path);
+        });
+    };
+
+    buildHierarchy(undefined, 0);
+    return result;
+  };
+
+  const hierarchicalCollections = getCollectionHierarchy();
+
+  // Reset form when modal closes or set preselected collection
   useEffect(() => {
     if (!isOpen) {
       setUrl('');
@@ -43,8 +76,10 @@ export default function AddLinkModal({
       setSelectedTags([]);
       setTagInput('');
       setShowOptions(false);
+    } else if (preselectedCollectionId) {
+      setCollectionId(preselectedCollectionId);
     }
-  }, [isOpen]);
+  }, [isOpen, preselectedCollectionId]);
 
   if (!isOpen) return null;
 
@@ -168,7 +203,7 @@ export default function AddLinkModal({
                         <div className="font-medium">Unorganized</div>
                         <div className="text-xs text-zinc-500">Default collection</div>
                       </button>
-                      {collections.map((collection) => (
+                      {hierarchicalCollections.map((collection) => (
                         <button
                           key={collection.id}
                           type="button"
@@ -176,12 +211,20 @@ export default function AddLinkModal({
                             setCollectionId(collection.id);
                             setShowCollectionDropdown(false);
                           }}
-                          className="w-full px-3 py-2 text-left text-zinc-300 hover:bg-zinc-800 rounded-lg transition-colors flex items-center justify-between"
+                          className="w-full px-3 py-2 text-left text-zinc-300 hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-2"
+                          style={{ paddingLeft: `${collection.level * 16 + 12}px` }}
                         >
-                          <div>
-                            <div className="font-medium">{collection.name}</div>
+                          <div
+                            className="w-2 h-2 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: collection.color || '#6366f1' }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate">
+                              {collection.level > 0 && '└─ '}
+                              {collection.name}
+                            </div>
                             {collection.description && (
-                              <div className="text-xs text-zinc-500">{collection.description}</div>
+                              <div className="text-xs text-zinc-500 truncate">{collection.description}</div>
                             )}
                           </div>
                         </button>

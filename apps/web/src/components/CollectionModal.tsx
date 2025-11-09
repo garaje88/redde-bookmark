@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { Collection } from '../types';
 
 interface CollectionModalProps {
   isOpen: boolean;
@@ -7,12 +8,15 @@ interface CollectionModalProps {
     name: string;
     description: string;
     color: string;
+    parentId?: string;
   }) => Promise<void>;
+  collections?: Collection[];
   collection?: {
     id: string;
     name: string;
     description?: string;
     color?: string;
+    parentId?: string;
   } | null;
 }
 
@@ -35,11 +39,13 @@ export default function CollectionModal({
   isOpen,
   onClose,
   onSubmit,
+  collections = [],
   collection
 }: CollectionModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [color, setColor] = useState(COLLECTION_COLORS[0]);
+  const [parentId, setParentId] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -47,12 +53,38 @@ export default function CollectionModal({
       setName(collection.name);
       setDescription(collection.description || '');
       setColor(collection.color || COLLECTION_COLORS[0]);
+      setParentId(collection.parentId || '');
     } else if (!isOpen) {
       setName('');
       setDescription('');
       setColor(COLLECTION_COLORS[0]);
+      setParentId('');
     }
   }, [collection, isOpen]);
+
+  // Filtrar colecciones válidas para seleccionar como padre
+  // Solo se permiten 2 niveles de subcolecciones (0 -> 1 -> 2)
+  // Por lo tanto, solo las colecciones de nivel 0 y 1 pueden ser padres
+  const availableParentCollections = collections.filter(c => {
+    // No puede ser la misma colección
+    if (c.id === collection?.id) return false;
+
+    // No puede ser una subcolección de sí misma (evitar ciclos)
+    if (c.parentId === collection?.id) return false;
+
+    // Solo las colecciones de nivel 0 (sin padre) y nivel 1 (con padre de nivel 0) pueden ser padres
+    // Nivel 2 (con padre que tiene padre) no puede ser padre
+    if (c.parentId) {
+      // Esta colección es nivel 1 o nivel 2
+      const parent = collections.find(p => p.id === c.parentId);
+      if (parent?.parentId) {
+        // Esta colección es nivel 2, no puede ser padre
+        return false;
+      }
+    }
+
+    return true;
+  });
 
   if (!isOpen) return null;
 
@@ -65,7 +97,8 @@ export default function CollectionModal({
       await onSubmit({
         name: name.trim(),
         description: description.trim(),
-        color
+        color,
+        parentId: parentId || undefined
       });
       onClose();
     } catch (error) {
@@ -94,7 +127,7 @@ export default function CollectionModal({
           {/* Header */}
           <div className="flex items-center justify-between p-5 border-b border-zinc-800">
             <h2 className="text-lg font-semibold text-white">
-              Create a New Collection
+              {collection ? 'Edit Collection' : 'Create a New Collection'}
             </h2>
             <button
               onClick={onClose}
@@ -123,7 +156,7 @@ export default function CollectionModal({
               {/* Name Input */}
               <div className="flex-1">
                 <label className="block text-sm font-medium text-zinc-400 mb-1.5">
-                  Name
+                  Collection Name
                 </label>
                 <input
                   type="text"
@@ -149,6 +182,28 @@ export default function CollectionModal({
                 rows={3}
                 className="w-full px-3 py-2 bg-[#0d0d0f] border border-zinc-800 rounded-md text-white placeholder-zinc-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-colors"
               />
+            </div>
+
+            {/* Parent Collection */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">
+                Parent Collection (optional)
+              </label>
+              <select
+                value={parentId}
+                onChange={(e) => setParentId(e.target.value)}
+                className="w-full px-3 py-2 bg-[#0d0d0f] border border-zinc-800 rounded-md text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+              >
+                <option value="">None (Main Collection)</option>
+                {availableParentCollections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.parentId ? '  └─ ' : ''}{c.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-zinc-500 mt-1">
+                Select a parent to create a subcollection
+              </p>
             </div>
 
             {/* Color Selector */}
@@ -180,7 +235,7 @@ export default function CollectionModal({
                 disabled={!name.trim() || isSubmitting}
                 className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSubmitting ? 'Creating...' : 'Create Collection'}
+                {isSubmitting ? (collection ? 'Saving...' : 'Creating...') : (collection ? 'Save Changes' : 'Create Collection')}
               </button>
             </div>
           </form>
