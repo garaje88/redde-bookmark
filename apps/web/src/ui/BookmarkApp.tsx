@@ -32,7 +32,7 @@ export default function BookmarkApp() {
   const [activeView, setActiveView] = useState<'home' | 'links' | 'pinned' | 'collection' | 'collections'>('home');
   const [activeCollection, setActiveCollection] = useState<string | undefined>();
   const [activeTag, setActiveTag] = useState<string | undefined>();
-  const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
+  const [collectionPath, setCollectionPath] = useState<string[]>([]);
   const [preselectedCollectionId, setPreselectedCollectionId] = useState<string | undefined>();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [collectionToDelete, setCollectionToDelete] = useState<{ id: string; name: string } | null>(null);
@@ -67,7 +67,15 @@ export default function BookmarkApp() {
     return () => unsub();
   }, [user]);
 
-  // Calcular tags únicos
+  useEffect(() => {
+    setCollectionPath((prev) =>
+      prev
+        .filter(id => collections.some(c => c.id === id))
+        .slice(0, 3) // Limitar profundidad máxima (principal + 2 niveles hijas)
+    );
+  }, [collections]);
+
+  // Calcular tags Ãºnicos
   const tags = useMemo(() => {
     const tagMap = new Map<string, number>();
     bookmarks.forEach(bookmark => {
@@ -92,7 +100,16 @@ export default function BookmarkApp() {
     return counts;
   }, [bookmarks]);
 
-  // Filtrar bookmarks por búsqueda primero (se aplica siempre)
+  const childCountByCollection = useMemo(() => {
+    const counts: Record<string, number> = {};
+    collections.forEach((collection) => {
+      if (!collection.parentId) return;
+      counts[collection.parentId] = (counts[collection.parentId] || 0) + 1;
+    });
+    return counts;
+  }, [collections]);
+
+  // Filtrar bookmarks por bÃºsqueda primero (se aplica siempre)
   const searchFiltered = useMemo(() => {
     const search = searchQuery.trim().toLowerCase();
     if (!search) return bookmarks;
@@ -123,6 +140,73 @@ export default function BookmarkApp() {
 
     return result;
   }, [searchFiltered, activeView, activeCollection, activeTag]);
+
+  const maxChildLevels = 2;
+
+  const collectionColumns = useMemo(() => {
+    if (collections.length === 0) {
+      return [];
+    }
+
+    const cols: Array<{
+      level: number;
+      parentId?: string;
+      items: Collection[];
+      selectedId?: string;
+    }> = [
+      {
+        level: 0,
+        items: collections.filter(c => !c.parentId),
+        selectedId: collectionPath[0]
+      }
+    ];
+
+    collectionPath.slice(0, maxChildLevels).forEach((parentId, index) => {
+      cols.push({
+        level: index + 1,
+        parentId,
+        items: collections.filter(c => c.parentId === parentId),
+        selectedId: collectionPath[index + 1]
+      });
+    });
+
+    return cols;
+  }, [collections, collectionPath]);
+
+  const selectedTrail = useMemo(
+    () => collectionPath
+      .map(id => collections.find(c => c.id === id))
+      .filter((collection): collection is Collection => Boolean(collection)),
+    [collectionPath, collections]
+  );
+
+  const selectedCollection = selectedTrail[selectedTrail.length - 1];
+
+  const selectedCollectionBookmarks = useMemo(() => {
+    if (!selectedCollection) {
+      return [];
+    }
+    return bookmarks.filter(b => b.collectionId === selectedCollection.id);
+  }, [bookmarks, selectedCollection?.id]);
+
+  const columnViewportHeight = 'calc(100vh - 220px)';
+
+  const getColumnTitle = (level: number) => {
+    if (level === 0) return 'Colecciones principales';
+    if (level === 1) return 'Colecciones hijas - Nivel 2';
+    if (level === 2) return 'Colecciones hijas - Nivel 3';
+    return `Nivel ${level + 1}`;
+  };
+
+  const handleSelectCollection = (collectionId: string, level: number) => {
+    setCollectionPath((prev) => {
+      const next = prev.slice(0, level);
+      next[level] = collectionId;
+      return next.slice(0, maxChildLevels + 1);
+    });
+  };
+
+  const handleClearCollectionPath = () => setCollectionPath([]);
 
   async function handleCreateBookmark(data: {
     url: string;
@@ -246,7 +330,7 @@ export default function BookmarkApp() {
     if (activeView === 'collections') return 'Colecciones';
     if (activeView === 'collection' && activeCollection) {
       const col = collections.find(c => c.id === activeCollection);
-      return col?.name || 'Colección';
+      return col?.name || 'ColecciÃ³n';
     }
     if (activeTag) return `#${activeTag}`;
     return 'Dashboard';
@@ -568,396 +652,226 @@ export default function BookmarkApp() {
           {/* Collections View */}
           {activeView === 'collections' && (
             <>
-              <div className="flex items-center justify-between mb-5">
-                <h1 className="text-xl font-semibold text-white flex items-center gap-2">
-                  <svg className="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                  </svg>
-                  Collections
-                </h1>
-                <span className="text-sm text-zinc-500">{collections.length} collections</span>
+              <div className="flex flex-wrap items-start justify-between gap-4 mb-5">
+                <div>
+                  <div className="flex items-center gap-2 text-xl font-semibold text-white">
+                    <svg className="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    Colecciones
+                  </div>
+                  <p className="text-sm text-zinc-500">
+                    Navega {collections.length} colecciones por niveles y encuentra rapidamente sus enlaces.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingCollection(null);
+                      setShowCollectionModal(true);
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600/20 text-purple-200 border border-purple-500/40 hover:bg-purple-600/30 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Nueva coleccion
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearCollectionPath}
+                    disabled={collectionPath.length === 0}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Limpiar seleccion
+                  </button>
+                </div>
               </div>
 
               {collections.length > 0 ? (
                 <div className="flex gap-4 overflow-x-auto pb-4">
-                  {collections
-                    .filter(c => !c.parentId) // Solo colecciones principales
-                    .map((mainCollection) => {
-                      const mainBookmarks = bookmarks.filter(b => b.collectionId === mainCollection.id);
-                      const level1Subs = collections.filter(c => c.parentId === mainCollection.id);
+                  {collectionColumns.map((column) => (
+                    <div
+                      key={`${column.level}-${column.parentId || 'root'}`}
+                      className="flex-shrink-0 w-64 lg:w-72 bg-[rgba(8,8,11,0.85)] border border-zinc-900/40 shadow-[0_15px_40px_rgba(0,0,0,0.35)] rounded-3xl p-4 flex flex-col"
+                      style={{ height: columnViewportHeight, maxHeight: columnViewportHeight }}
+                    >
+                      <div className="text-xs uppercase tracking-[0.35em] text-zinc-500 mb-3">
+                        {getColumnTitle(column.level)}
+                      </div>
+                      <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                        {column.items.length > 0 ? (
+                          column.items.map((collection) => {
+                            const isSelected = column.selectedId === collection.id;
+                            const childCount = childCountByCollection[collection.id] || 0;
+                            const bookmarkCount = collectionCounts[collection.id] || 0;
+                            const meta: string[] = [];
+                            if (childCount > 0) {
+                              meta.push(`${childCount} ${childCount === 1 ? 'sub' : 'subs'}`);
+                            }
+                            if (bookmarkCount > 0) {
+                              meta.push(`${bookmarkCount} ${bookmarkCount === 1 ? 'link' : 'links'}`);
+                            }
 
-                      return (
-                        <div
-                          key={mainCollection.id}
-                          className="flex-shrink-0 w-80 bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 flex flex-col"
-                          style={{ height: 'calc(100vh - 180px)', maxHeight: 'calc(100vh - 180px)' }}
-                        >
-                          {/* Main Collection Header */}
-                          <div className="mb-4 border-b border-zinc-800 pb-3">
-                            <div className="flex items-center gap-2 mb-2">
-                              <div
-                                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                                style={{ backgroundColor: mainCollection.color || '#6366f1' }}
-                              >
-                                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                                </svg>
-                              </div>
+                            return (
                               <button
-                                onClick={() => {
-                                  setActiveView('collection');
-                                  setActiveCollection(mainCollection.id);
-                                }}
-                                className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
+                                key={collection.id}
+                                type="button"
+                                onClick={() => handleSelectCollection(collection.id, column.level)}
+                                className={`w-full text-left rounded-2xl border px-3 py-2.5 flex items-center gap-3 transition-all ${
+                                  isSelected
+                                    ? 'border-purple-500/70 bg-purple-500/15 shadow-[0_0_20px_rgba(168,85,247,0.15)]'
+                                    : 'border-transparent bg-zinc-900/60 hover:border-zinc-700/80 hover:bg-zinc-900/80'
+                                }`}
                               >
-                                <h3 className="font-medium text-zinc-100 truncate cursor-pointer">{mainCollection.name}</h3>
-                                {mainCollection.description && (
-                                  <p className="text-xs text-zinc-500 truncate">{mainCollection.description}</p>
-                                )}
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setActiveView('collection');
-                                  setActiveCollection(mainCollection.id);
-                                }}
-                                className="text-zinc-400 hover:text-zinc-200"
-                                title="View collection"
-                              >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <div
+                                  className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-white"
+                                  style={{ backgroundColor: collection.color || '#6366f1' }}
+                                >
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                                  </svg>
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-medium text-white truncate">{collection.name}</p>
+                                  <p className="text-xs text-zinc-500 truncate">
+                                    {meta.length > 0 ? meta.join(' / ') : 'Sin elementos'}
+                                  </p>
+                                </div>
+                                <svg
+                                  className={`w-4 h-4 flex-shrink-0 transition-colors ${isSelected ? 'text-purple-300' : 'text-zinc-600'}`}
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                 </svg>
                               </button>
-                            </div>
-                            {/* Action buttons */}
-                            <div className="flex gap-1">
-                              <button
-                                onClick={() => {
-                                  setPreselectedCollectionId(mainCollection.id);
-                                  setShowAddModal(true);
-                                }}
-                                className="flex-1 px-2 py-1 text-xs bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded transition-colors flex items-center justify-center gap-1"
-                                title="Create link"
-                              >
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                </svg>
-                                Link
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setEditingCollection(mainCollection);
-                                  setShowCollectionModal(true);
-                                }}
-                                className="px-2 py-1 text-xs bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400 rounded transition-colors"
-                                title="Edit"
-                              >
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setCollectionToDelete({ id: mainCollection.id, name: mainCollection.name });
-                                  setShowDeleteConfirm(true);
-                                }}
-                                className="px-2 py-1 text-xs bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded transition-colors"
-                                title="Delete"
-                              >
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
+                            );
+                          })
+                        ) : (
+                          <div className="h-full flex items-center justify-center text-center text-xs text-zinc-500 border border-dashed border-zinc-800/60 rounded-2xl px-3 py-6">
+                            {column.level === 0 ? 'No hay colecciones principales todavia' : 'Sin colecciones hijas'}
                           </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
 
-                          {/* Scrollable Content */}
-                          <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-                            {/* Level 1 Subcollections */}
-                            {level1Subs.map((sub1) => {
-                              const sub1Bookmarks = bookmarks.filter(b => b.collectionId === sub1.id);
-                              const level2Subs = collections.filter(c => c.parentId === sub1.id);
-                              const isExpanded = expandedCollections.has(sub1.id);
-
-                              return (
-                                <div key={sub1.id} className="border-l-2 border-zinc-700 pl-3">
-                                  <div className="flex items-center gap-1 mb-2">
-                                    <button
-                                      onClick={() => {
-                                        const newExpanded = new Set(expandedCollections);
-                                        if (newExpanded.has(sub1.id)) {
-                                          newExpanded.delete(sub1.id);
-                                        } else {
-                                          newExpanded.add(sub1.id);
-                                        }
-                                        setExpandedCollections(newExpanded);
-                                      }}
-                                      className="text-zinc-500 hover:text-zinc-300 flex-shrink-0"
-                                    >
-                                      <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                      </svg>
-                                    </button>
-                                    <div
-                                      className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0"
-                                      style={{ backgroundColor: sub1.color || '#6366f1' }}
-                                    >
-                                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                                      </svg>
-                                    </div>
-                                    <button
-                                      onClick={() => {
-                                        setActiveView('collection');
-                                        setActiveCollection(sub1.id);
-                                      }}
-                                      className="text-sm font-medium text-zinc-200 truncate flex-1 text-left hover:text-white transition-colors cursor-pointer"
-                                    >
-                                      {sub1.name}
-                                    </button>
-                                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <button
-                                        onClick={() => {
-                                          setPreselectedCollectionId(sub1.id);
-                                          setShowAddModal(true);
-                                        }}
-                                        className="p-1 text-blue-400 hover:bg-blue-600/20 rounded"
-                                        title="Create link"
-                                      >
-                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                        </svg>
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          setEditingCollection(sub1);
-                                          setShowCollectionModal(true);
-                                        }}
-                                        className="p-1 text-yellow-400 hover:bg-yellow-600/20 rounded"
-                                        title="Edit"
-                                      >
-                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                        </svg>
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          setCollectionToDelete({ id: sub1.id, name: sub1.name });
-                                          setShowDeleteConfirm(true);
-                                        }}
-                                        className="p-1 text-red-400 hover:bg-red-600/20 rounded"
-                                        title="Delete"
-                                      >
-                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                      </button>
-                                    </div>
-                                    <button
-                                      onClick={() => {
-                                        setActiveView('collection');
-                                        setActiveCollection(sub1.id);
-                                      }}
-                                      className="text-zinc-500 hover:text-zinc-300"
-                                      title="View collection"
-                                    >
-                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                      </svg>
-                                    </button>
-                                  </div>
-
-                                  {/* Level 2 Subcollections */}
-                                  {isExpanded && level2Subs.length > 0 && (
-                                    <div className="ml-4 space-y-2 mb-2">
-                                      {level2Subs.map((sub2) => {
-                                        const sub2Bookmarks = bookmarks.filter(b => b.collectionId === sub2.id);
-                                        return (
-                                          <div key={sub2.id} className="border-l border-zinc-700 pl-2 group">
-                                            <div className="flex items-center gap-1 mb-1">
-                                              <div
-                                                className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
-                                                style={{ backgroundColor: sub2.color || '#6366f1' }}
-                                              >
-                                                <svg className="w-2 h-2 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                                                </svg>
-                                              </div>
-                                              <button
-                                                onClick={() => {
-                                                  setActiveView('collection');
-                                                  setActiveCollection(sub2.id);
-                                                }}
-                                                className="text-xs text-zinc-300 truncate flex-1 text-left hover:text-white transition-colors cursor-pointer"
-                                              >
-                                                {sub2.name}
-                                              </button>
-                                              <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                  onClick={() => {
-                                                    setPreselectedCollectionId(sub2.id);
-                                                    setShowAddModal(true);
-                                                  }}
-                                                  className="p-0.5 text-blue-400 hover:bg-blue-600/20 rounded"
-                                                  title="Create link"
-                                                >
-                                                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                                  </svg>
-                                                </button>
-                                                <button
-                                                  onClick={() => {
-                                                    setEditingCollection(sub2);
-                                                    setShowCollectionModal(true);
-                                                  }}
-                                                  className="p-0.5 text-yellow-400 hover:bg-yellow-600/20 rounded"
-                                                  title="Edit"
-                                                >
-                                                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                  </svg>
-                                                </button>
-                                                <button
-                                                  onClick={() => {
-                                                    setCollectionToDelete({ id: sub2.id, name: sub2.name });
-                                                    setShowDeleteConfirm(true);
-                                                  }}
-                                                  className="p-0.5 text-red-400 hover:bg-red-600/20 rounded"
-                                                  title="Delete"
-                                                >
-                                                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                  </svg>
-                                                </button>
-                                              </div>
-                                              <button
-                                                onClick={() => {
-                                                  setActiveView('collection');
-                                                  setActiveCollection(sub2.id);
-                                                }}
-                                                className="text-zinc-500 hover:text-zinc-300"
-                                                title="View collection"
-                                              >
-                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                                </svg>
-                                              </button>
-                                            </div>
-
-                                            {/* Level 2 Links */}
-                                            {sub2Bookmarks.length > 0 && (
-                                              <div className="ml-4 space-y-1">
-                                                {sub2Bookmarks.slice(0, 3).map((bookmark) => (
-                                                  <button
-                                                    key={bookmark.id}
-                                                    onClick={() => window.open(bookmark.url, '_blank')}
-                                                    className="w-full flex items-center gap-2 px-1.5 py-1 rounded text-xs text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-all"
-                                                  >
-                                                    <img
-                                                      src={bookmark.faviconUrl}
-                                                      alt=""
-                                                      className="w-3 h-3 flex-shrink-0"
-                                                      onError={(e) => {
-                                                        e.currentTarget.style.display = 'none';
-                                                      }}
-                                                    />
-                                                    <span className="truncate flex-1 text-left">{bookmark.title}</span>
-                                                  </button>
-                                                ))}
-                                                {sub2Bookmarks.length > 3 && (
-                                                  <p className="text-xs text-zinc-600 ml-1.5">+{sub2Bookmarks.length - 3} more</p>
-                                                )}
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-
-                                  {/* Level 1 Links */}
-                                  {isExpanded && sub1Bookmarks.length > 0 && (
-                                    <div className="ml-4 space-y-1">
-                                      {sub1Bookmarks.slice(0, 4).map((bookmark) => (
-                                        <button
-                                          key={bookmark.id}
-                                          onClick={() => window.open(bookmark.url, '_blank')}
-                                          className="w-full flex items-center gap-2 px-1.5 py-1 rounded text-xs text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-all"
-                                        >
-                                          <img
-                                            src={bookmark.faviconUrl}
-                                            alt=""
-                                            className="w-3 h-3 flex-shrink-0"
-                                            onError={(e) => {
-                                              e.currentTarget.style.display = 'none';
-                                            }}
-                                          />
-                                          <span className="truncate flex-1 text-left">{bookmark.title}</span>
-                                        </button>
-                                      ))}
-                                      {sub1Bookmarks.length > 4 && (
-                                        <p className="text-xs text-zinc-600 ml-1.5">+{sub1Bookmarks.length - 4} more</p>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-
-                            {/* Main Collection Links */}
-                            {mainBookmarks.length > 0 && (
-                              <div className="space-y-1">
-                                {mainBookmarks.slice(0, 5).map((bookmark) => (
-                                  <button
-                                    key={bookmark.id}
-                                    onClick={() => window.open(bookmark.url, '_blank')}
-                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-all"
-                                  >
-                                    <img
-                                      src={bookmark.faviconUrl}
-                                      alt=""
-                                      className="w-3 h-3 flex-shrink-0"
-                                      onError={(e) => {
-                                        e.currentTarget.style.display = 'none';
-                                      }}
-                                    />
-                                    <span className="truncate flex-1 text-left">{bookmark.title}</span>
-                                  </button>
-                                ))}
-                                {mainBookmarks.length > 5 && (
-                                  <p className="text-xs text-zinc-600 px-2">+{mainBookmarks.length - 5} more</p>
-                                )}
-                              </div>
-                            )}
-                          </div>
+                  {selectedCollection && (
+                    <div
+                      className="flex-shrink-0 w-72 bg-[rgba(8,8,11,0.9)] border border-zinc-900/40 shadow-[0_15px_40px_rgba(0,0,0,0.35)] rounded-3xl p-4 flex flex-col"
+                      style={{ height: columnViewportHeight, maxHeight: columnViewportHeight }}
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-4">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Ultimo nivel - Links</p>
+                          <p className="text-base font-semibold text-white">{selectedCollection.name}</p>
+                          {selectedTrail.length > 1 && (
+                            <p className="text-xs text-zinc-500 mt-1 truncate">
+                              {selectedTrail.map((c) => c.name).join(' / ')}
+                            </p>
+                          )}
                         </div>
-                      );
-                    })}
+                        <span className="text-xs text-zinc-500">{selectedCollectionBookmarks.length} links</span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreselectedCollectionId(selectedCollection.id);
+                            setShowAddModal(true);
+                          }}
+                          className="px-3 py-1.5 text-xs rounded-full bg-blue-600/20 text-blue-300 border border-blue-500/30 hover:bg-blue-600/30 transition-colors"
+                        >
+                          Nuevo link
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingCollection(selectedCollection);
+                            setShowCollectionModal(true);
+                          }}
+                          className="px-3 py-1.5 text-xs rounded-full bg-yellow-500/20 text-yellow-200 border border-yellow-400/30 hover:bg-yellow-500/30 transition-colors"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCollectionToDelete({ id: selectedCollection.id, name: selectedCollection.name });
+                            setShowDeleteConfirm(true);
+                          }}
+                          className="px-3 py-1.5 text-xs rounded-full bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25 transition-colors"
+                        >
+                          Eliminar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveView('collection');
+                            setActiveCollection(selectedCollection.id);
+                          }}
+                          className="px-3 py-1.5 text-xs rounded-full bg-zinc-900 text-zinc-200 border border-zinc-700 hover:bg-zinc-800 transition-colors"
+                        >
+                          Ver detalle
+                        </button>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                        {selectedCollectionBookmarks.length > 0 ? (
+                          selectedCollectionBookmarks.map((bookmark) => (
+                            <button
+                              key={bookmark.id}
+                              type="button"
+                              onClick={() => {
+                                if (typeof window !== 'undefined') {
+                                  window.open(bookmark.url, '_blank', 'noopener,noreferrer');
+                                }
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2 rounded-2xl border border-transparent bg-zinc-900/60 hover:border-purple-500/40 hover:bg-zinc-900 transition-all text-left"
+                            >
+                              <div className="w-7 h-7 rounded-xl bg-zinc-800/80 flex items-center justify-center text-purple-300">
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l4-4a4 4 0 015.656-5.656l-1.1 1.1" />
+                                </svg>
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium text-white truncate">{bookmark.title || bookmark.url}</p>
+                                <p className="text-xs text-zinc-500 truncate">
+                                  {bookmark.url.replace(/^https?:\/\//, '')}
+                                </p>
+                              </div>
+                              <svg className="w-4 h-4 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                              </svg>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="text-sm text-zinc-500 text-center border border-dashed border-zinc-800/60 rounded-2xl px-3 py-6">
+                            Esta coleccion todavia no tiene links.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div className="text-center py-20 border border-dashed border-zinc-800 rounded-lg">
+                <div className="text-center py-20 border border-dashed border-zinc-800 rounded-3xl">
                   <div className="w-12 h-12 bg-zinc-900 rounded-full flex items-center justify-center mx-auto mb-3">
                     <svg className="w-6 h-6 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                     </svg>
                   </div>
-                  <p className="text-sm text-zinc-500 mb-1">No collections</p>
-                  <p className="text-xs text-zinc-600">Create your first collection to get started</p>
+                  <p className="text-sm text-zinc-500 mb-1">Aun no tienes colecciones</p>
+                  <p className="text-xs text-zinc-600">Crea una coleccion para comenzar a organizar tus links.</p>
                 </div>
               )}
-
-              {/* Floating Action Button */}
-              <button
-                onClick={() => {
-                  setEditingCollection(null);
-                  setShowCollectionModal(true);
-                }}
-                className="fixed bottom-6 right-6 w-14 h-14 bg-purple-600 hover:bg-purple-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-30"
-                title="Create New Collection"
-              >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </button>
             </>
           )}
 
