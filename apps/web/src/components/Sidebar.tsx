@@ -39,10 +39,12 @@ export default function Sidebar({
     level: number;
   }
 
+  const normalizeParent = (value?: string | null) => value ?? null;
+
   const buildCollectionTree = (): CollectionNode[] => {
-    const buildNode = (parentId: string | undefined, level: number = 0): CollectionNode[] => {
+    const buildNode = (parentId: string | null = null, level: number = 0): CollectionNode[] => {
       return collections
-        .filter(c => c.parentId === parentId)
+        .filter(c => normalizeParent(c.parentId) === parentId)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(c => ({
           ...c,
@@ -50,7 +52,7 @@ export default function Sidebar({
           children: buildNode(c.id, level + 1)
         }));
     };
-    return buildNode(undefined);
+    return buildNode(null);
   };
 
   const collectionTree = buildCollectionTree();
