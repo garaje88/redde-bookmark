@@ -33,6 +33,8 @@ const COLLECTION_COLORS = [
 ];
 
 const DEFAULT_COLLECTION_ICON = '\u{1F4C1}';
+const UNCATEGORIZED_COLLECTION_ID = '__uncategorized__';
+const INBOX_COLLECTION_ID = 'inbox';
 const NETSCAPE_ROOT_TITLE = 'Marcadores';
 const NETSCAPE_HEADER = [
   '<!DOCTYPE NETSCAPE-Bookmark-file-1>',
@@ -78,6 +80,9 @@ interface ParsedBookmark {
 }
 
 type ParsedNode = ParsedFolder | ParsedBookmark;
+
+const isUnassignedBookmark = (bookmark: Bookmark) =>
+  !bookmark.collectionId || bookmark.collectionId === INBOX_COLLECTION_ID;
 
 const escapeHtml = (value?: string) => {
   if (!value) return '';
@@ -362,6 +367,11 @@ export default function BookmarkApp() {
 
   useEffect(() => onAuthStateChanged(auth, setUser), []);
 
+  const unassignedBookmarks = useMemo(
+    () => bookmarks.filter(isUnassignedBookmark),
+    [bookmarks]
+  );
+
   // Cargar bookmarks
   useEffect(() => {
     if (!user) {
@@ -393,10 +403,15 @@ export default function BookmarkApp() {
   useEffect(() => {
     setCollectionPath((prev) =>
       prev
-        .filter(id => collections.some(c => c.id === id))
+        .filter(id => {
+          if (id === UNCATEGORIZED_COLLECTION_ID) {
+            return Boolean(unassignedBookmarks.length);
+          }
+          return collections.some(c => c.id === id);
+        })
         .slice(0, 3) // Limitar profundidad máxima (principal + 2 niveles hijas)
     );
-  }, [collections]);
+  }, [collections, unassignedBookmarks.length]);
 
   // Calcular tags Ãºnicos
   const tags = useMemo(() => {
@@ -416,12 +431,16 @@ export default function BookmarkApp() {
     const counts: Record<string, number> = {};
     bookmarks.forEach(bookmark => {
       const colId = bookmark.collectionId;
-      if (colId) {
-        counts[colId] = (counts[colId] || 0) + 1;
+      if (!colId || colId === INBOX_COLLECTION_ID) {
+        return;
       }
+      counts[colId] = (counts[colId] || 0) + 1;
     });
+    if (unassignedBookmarks.length > 0) {
+      counts[UNCATEGORIZED_COLLECTION_ID] = unassignedBookmarks.length;
+    }
     return counts;
-  }, [bookmarks]);
+  }, [bookmarks, unassignedBookmarks.length]);
 
   const childCountByCollection = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -431,6 +450,28 @@ export default function BookmarkApp() {
     });
     return counts;
   }, [collections]);
+
+  const unassignedCollection = useMemo(() => {
+    if (unassignedBookmarks.length === 0) {
+      return null;
+    }
+    return {
+      id: UNCATEGORIZED_COLLECTION_ID,
+      name: 'Links sin colección',
+      description: 'Links que aún no pertenecen a una colección',
+      color: '#475569',
+      icon: DEFAULT_COLLECTION_ICON,
+      parentId: undefined,
+      owner: 'system',
+      createdAt: null,
+      updatedAt: null
+    } as Collection;
+  }, [unassignedBookmarks.length]);
+
+  const rootCollections = useMemo(() => {
+    const roots = collections.filter(c => !c.parentId);
+    return unassignedCollection ? [unassignedCollection, ...roots] : roots;
+  }, [collections, unassignedCollection]);
 
   // Filtrar bookmarks por bÃºsqueda primero (se aplica siempre)
   const searchFiltered = useMemo(() => {
@@ -467,7 +508,7 @@ export default function BookmarkApp() {
   const maxChildLevels = 2;
 
   const collectionColumns = useMemo(() => {
-    if (collections.length === 0) {
+    if (rootCollections.length === 0) {
       return [];
     }
 
@@ -479,12 +520,15 @@ export default function BookmarkApp() {
     }> = [
       {
         level: 0,
-        items: collections.filter(c => !c.parentId),
+        items: rootCollections,
         selectedId: collectionPath[0]
       }
     ];
 
     collectionPath.slice(0, maxChildLevels).forEach((parentId, index) => {
+      if (parentId === UNCATEGORIZED_COLLECTION_ID) {
+        return;
+      }
       cols.push({
         level: index + 1,
         parentId,
@@ -494,23 +538,34 @@ export default function BookmarkApp() {
     });
 
     return cols;
-  }, [collections, collectionPath]);
+  }, [collections, collectionPath, rootCollections]);
 
   const selectedTrail = useMemo(
     () => collectionPath
-      .map(id => collections.find(c => c.id === id))
+      .map(id => {
+        if (id === UNCATEGORIZED_COLLECTION_ID) {
+          return unassignedCollection;
+        }
+        return collections.find(c => c.id === id);
+      })
       .filter((collection): collection is Collection => Boolean(collection)),
-    [collectionPath, collections]
+    [collectionPath, collections, unassignedCollection]
   );
 
   const selectedCollection = selectedTrail[selectedTrail.length - 1];
+  const isVirtualCollection = selectedCollection?.id === UNCATEGORIZED_COLLECTION_ID;
 
   const selectedCollectionBookmarks = useMemo(() => {
     if (!selectedCollection) {
       return [];
     }
-    return bookmarks.filter(b => b.collectionId === selectedCollection.id);
-  }, [bookmarks, selectedCollection?.id]);
+    return bookmarks.filter(b => {
+      if (isVirtualCollection) {
+        return isUnassignedBookmark(b);
+      }
+      return b.collectionId === selectedCollection.id;
+    });
+  }, [bookmarks, selectedCollection?.id, isVirtualCollection]);
 
   const columnViewportHeight = 'calc(100vh - 220px)';
 
@@ -1279,45 +1334,67 @@ export default function BookmarkApp() {
                       <div className="flex flex-wrap gap-2 mb-4">
                         <button
                           type="button"
+                          disabled={isVirtualCollection}
                           onClick={() => {
+                            if (!selectedCollection) return;
                             setPreselectedCollectionId(selectedCollection.id);
                             setShowAddModal(true);
                           }}
-                          className="px-3 py-1.5 text-xs rounded-full bg-blue-600/20 text-blue-300 border border-blue-500/30 hover:bg-blue-600/30 transition-colors"
+                          className={`px-3 py-1.5 text-xs rounded-full border border-blue-500/30 transition-colors ${
+                            isVirtualCollection
+                              ? 'bg-blue-600/10 text-blue-400/60 cursor-not-allowed'
+                              : 'bg-blue-600/20 text-blue-300 hover:bg-blue-600/30'
+                          }`}
                         >
                           Nuevo link
                         </button>
+                        {!isVirtualCollection && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingCollection(selectedCollection);
+                                setShowCollectionModal(true);
+                              }}
+                              className="px-3 py-1.5 text-xs rounded-full bg-yellow-500/20 text-yellow-200 border border-yellow-400/30 hover:bg-yellow-500/30 transition-colors"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!selectedCollection) return;
+                                setCollectionToDelete({ id: selectedCollection.id, name: selectedCollection.name });
+                                setShowDeleteConfirm(true);
+                              }}
+                              className="px-3 py-1.5 text-xs rounded-full bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25 transition-colors"
+                            >
+                              Eliminar
+                            </button>
+                          </>
+                        )}
                         <button
                           type="button"
+                          disabled={isVirtualCollection}
                           onClick={() => {
-                            setEditingCollection(selectedCollection);
-                            setShowCollectionModal(true);
-                          }}
-                          className="px-3 py-1.5 text-xs rounded-full bg-yellow-500/20 text-yellow-200 border border-yellow-400/30 hover:bg-yellow-500/30 transition-colors"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCollectionToDelete({ id: selectedCollection.id, name: selectedCollection.name });
-                            setShowDeleteConfirm(true);
-                          }}
-                          className="px-3 py-1.5 text-xs rounded-full bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25 transition-colors"
-                        >
-                          Eliminar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
+                            if (!selectedCollection) return;
                             setActiveView('collection');
                             setActiveCollection(selectedCollection.id);
                           }}
-                          className="px-3 py-1.5 text-xs rounded-full bg-zinc-900 text-zinc-200 border border-zinc-700 hover:bg-zinc-800 transition-colors"
+                          className={`px-3 py-1.5 text-xs rounded-full border border-zinc-700 transition-colors ${
+                            isVirtualCollection
+                              ? 'bg-zinc-900/60 text-zinc-500 cursor-not-allowed'
+                              : 'bg-zinc-900 text-zinc-200 hover:bg-zinc-800'
+                          }`}
                         >
                           Ver detalle
                         </button>
                       </div>
+                      {isVirtualCollection && (
+                        <p className="text-xs text-blue-300 mb-3">
+                          Estos links aún no tienen colección asignada. Edita cada uno para moverlo a una carpeta.
+                        </p>
+                      )}
 
                       <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                         {selectedCollectionBookmarks.length > 0 ? (
