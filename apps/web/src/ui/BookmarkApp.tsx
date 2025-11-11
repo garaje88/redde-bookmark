@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
 import { auth, db, googleProvider, githubProvider } from '../firebase';
 import type { User } from 'firebase/auth';
 import { signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
@@ -14,6 +15,313 @@ import EditLinkModal from '../components/EditLinkModal';
 import CollectionManager from '../components/CollectionManager';
 import DashboardStats from '../components/DashboardStats';
 import ConfirmModal from '../components/ConfirmModal';
+import FeedbackModal from '../components/FeedbackModal';
+
+const COLLECTION_COLORS = [
+  '#3b82f6',
+  '#8b5cf6',
+  '#ec4899',
+  '#ef4444',
+  '#f97316',
+  '#f59e0b',
+  '#eab308',
+  '#84cc16',
+  '#22c55e',
+  '#10b981',
+  '#14b8a6',
+  '#06b6d4'
+];
+
+const DEFAULT_COLLECTION_ICON = '\u{1F4C1}';
+const NETSCAPE_ROOT_TITLE = 'Marcadores';
+const NETSCAPE_HEADER = [
+  '<!DOCTYPE NETSCAPE-Bookmark-file-1>',
+  '<!-- This is an automatically generated file.',
+  '     It will be read and overwritten.',
+  '     DO NOT EDIT! -->',
+  '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">',
+  '<TITLE>Bookmarks</TITLE>',
+  '<H1>Bookmarks</H1>'
+].join('\n');
+
+interface CollectionNode extends Collection {
+  children: CollectionNode[];
+  bookmarks: Bookmark[];
+}
+
+type StatusVariant = 'info' | 'success' | 'error';
+
+interface StatusModalState {
+  title: string;
+  message: string;
+  variant: StatusVariant;
+  confirmText?: string;
+}
+
+interface ParsedFolder {
+  type: 'folder';
+  title: string;
+  description: string;
+  addDate?: number;
+  lastModified?: number;
+  children: ParsedNode[];
+}
+
+interface ParsedBookmark {
+  type: 'bookmark';
+  title: string;
+  description: string;
+  url: string;
+  addDate?: number;
+  lastModified?: number;
+  icon?: string;
+}
+
+type ParsedNode = ParsedFolder | ParsedBookmark;
+
+const escapeHtml = (value?: string) => {
+  if (!value) return '';
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
+const toUnixSeconds = (value: any) => {
+  if (!value && value !== 0) return Math.floor(Date.now() / 1000);
+  if (typeof value === 'number') {
+    return Math.floor(value);
+  }
+  if (value instanceof Date) {
+    return Math.floor(value.getTime() / 1000);
+  }
+  if (typeof value === 'object' && value?.seconds) {
+    return Math.floor(value.seconds);
+  }
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) {
+      return Math.floor(parsed / 1000);
+    }
+  }
+  return Math.floor(Date.now() / 1000);
+};
+
+const sortCollectionTree = (nodes: CollectionNode[]) => {
+  nodes.sort((a, b) => a.name.localeCompare(b.name));
+  nodes.forEach(node => {
+    node.children && sortCollectionTree(node.children);
+    node.bookmarks.sort((a, b) => (a.title || a.url).localeCompare(b.title || b.url));
+  });
+};
+
+const buildCollectionTree = (collections: Collection[], bookmarks: Bookmark[]) => {
+  const map = new Map<string, CollectionNode>();
+  collections.forEach(col => {
+    map.set(col.id, { ...col, children: [], bookmarks: [] });
+  });
+
+  const roots: CollectionNode[] = [];
+  map.forEach(node => {
+    if (node.parentId && map.has(node.parentId)) {
+      map.get(node.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  });
+
+  const rootBookmarks: Bookmark[] = [];
+  bookmarks.forEach(bookmark => {
+    if (bookmark.collectionId && map.has(bookmark.collectionId)) {
+      map.get(bookmark.collectionId)!.bookmarks.push(bookmark);
+    } else {
+      rootBookmarks.push(bookmark);
+    }
+  });
+
+  sortCollectionTree(roots);
+  rootBookmarks.sort((a, b) => (a.title || a.url).localeCompare(b.title || b.url));
+
+  return { roots, rootBookmarks };
+};
+
+const renderBookmarkLine = (bookmark: Bookmark, lines: string[], level: number) => {
+  const indent = '  '.repeat(level);
+  const attributes = [
+    `HREF="${escapeHtml(bookmark.url)}"`,
+    `ADD_DATE="${toUnixSeconds(bookmark.createdAt)}"`,
+    `LAST_MODIFIED="${toUnixSeconds(bookmark.updatedAt)}"`
+  ];
+  if (bookmark.faviconUrl) {
+    attributes.push(`ICON="${escapeHtml(bookmark.faviconUrl)}"`);
+  }
+  lines.push(`${indent}<DT><A ${attributes.join(' ')}>${escapeHtml(bookmark.title || bookmark.url)}</A>`);
+  if (bookmark.description) {
+    lines.push(`${indent}<DD>${escapeHtml(bookmark.description)}`);
+  }
+};
+
+const renderCollectionNode = (node: CollectionNode, lines: string[], level: number) => {
+  const indent = '  '.repeat(level);
+  lines.push(`${indent}<DT><H3 ADD_DATE="${toUnixSeconds(node.createdAt)}" LAST_MODIFIED="${toUnixSeconds(node.updatedAt)}">${escapeHtml(node.name)}</H3>`);
+  if (node.description) {
+    lines.push(`${indent}<DD>${escapeHtml(node.description)}`);
+  }
+  lines.push(`${indent}<DL><p>`);
+  node.bookmarks.forEach(bookmark => renderBookmarkLine(bookmark, lines, level + 1));
+  node.children.forEach(child => renderCollectionNode(child, lines, level + 1));
+  lines.push(`${indent}</DL><p>`);
+};
+
+const generateNetscapeHtml = (bookmarks: Bookmark[], collections: Collection[]) => {
+  const { roots, rootBookmarks } = buildCollectionTree(collections, bookmarks);
+  const lines: string[] = [NETSCAPE_HEADER, '<DL><p>'];
+  const rootTimestamp = Math.floor(Date.now() / 1000);
+  lines.push(
+    `  <DT><H3 ADD_DATE="${rootTimestamp}" LAST_MODIFIED="${rootTimestamp}" PERSONAL_TOOLBAR_FOLDER="true">${NETSCAPE_ROOT_TITLE}</H3>`
+  );
+  lines.push('  <DL><p>');
+  rootBookmarks.forEach(bookmark => renderBookmarkLine(bookmark, lines, 2));
+  roots.forEach(node => renderCollectionNode(node, lines, 2));
+  lines.push('  </DL><p>');
+  lines.push('</DL><p>');
+  return lines.join('\n');
+};
+
+const decodeHtmlEntities = (value?: string) => {
+  if (!value) return '';
+  if (typeof window === 'undefined' || typeof window.DOMParser === 'undefined') {
+    return value
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+  }
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(value, 'text/html');
+  return doc.documentElement.textContent || '';
+};
+
+const parseAttributeMap = (raw: string) => {
+  const attrs: Record<string, string> = {};
+  if (!raw) return attrs;
+  const regex = /([A-Z0-9_:-]+)\s*=\s*"([^"]*)"/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(raw))) {
+    attrs[match[1].toUpperCase()] = match[2];
+  }
+  return attrs;
+};
+
+const parseNetscapeBookmarks = (html: string): ParsedNode[] => {
+  const root: ParsedFolder = {
+    type: 'folder',
+    title: '__root__',
+    description: '',
+    children: []
+  };
+
+  const parentStack: ParsedFolder[] = [root];
+  let pendingFolder: ParsedFolder | null = null;
+  let lastFolder: ParsedFolder | null = null;
+  let lastBookmark: ParsedBookmark | null = null;
+
+  const lines = html.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const upper = line.toUpperCase();
+
+    if (upper.startsWith('<DT><H3')) {
+      const match = line.match(/^<DT><H3([^>]*)>(.*?)<\/H3>/i);
+      if (match) {
+        const attrs = parseAttributeMap(match[1]);
+        const folderNode: ParsedFolder = {
+          type: 'folder',
+          title: decodeHtmlEntities(match[2]),
+          description: '',
+          addDate: attrs.ADD_DATE ? Number(attrs.ADD_DATE) : undefined,
+          lastModified: attrs.LAST_MODIFIED ? Number(attrs.LAST_MODIFIED) : undefined,
+          children: []
+        };
+        parentStack[parentStack.length - 1].children.push(folderNode);
+        pendingFolder = folderNode;
+        lastFolder = folderNode;
+        lastBookmark = null;
+      }
+      continue;
+    }
+
+    if (upper.startsWith('<DT><A')) {
+      const match = line.match(/^<DT><A([^>]*)>(.*?)<\/A>/i);
+      if (match) {
+        const attrs = parseAttributeMap(match[1]);
+        const href = attrs.HREF || attrs.href;
+        if (href) {
+          const bookmarkNode: ParsedBookmark = {
+            type: 'bookmark',
+            url: href,
+            title: decodeHtmlEntities(match[2]),
+            description: '',
+            addDate: attrs.ADD_DATE ? Number(attrs.ADD_DATE) : undefined,
+            lastModified: attrs.LAST_MODIFIED ? Number(attrs.LAST_MODIFIED) : undefined,
+            icon: attrs.ICON || attrs.ICON_URI
+          };
+          parentStack[parentStack.length - 1].children.push(bookmarkNode);
+          lastBookmark = bookmarkNode;
+          lastFolder = null;
+        }
+      }
+      continue;
+    }
+
+    if (upper.startsWith('<DD>')) {
+      const text = decodeHtmlEntities(
+        line
+          .replace(/^<DD>/i, '')
+          .replace(/<\/DD>/i, '')
+          .trim()
+      );
+      if (text) {
+        if (lastBookmark) {
+          lastBookmark.description = lastBookmark.description
+            ? `${lastBookmark.description}\n${text}`
+            : text;
+        } else if (lastFolder) {
+          lastFolder.description = lastFolder.description
+            ? `${lastFolder.description}\n${text}`
+            : text;
+        }
+      }
+      continue;
+    }
+
+    if (upper.startsWith('<DL')) {
+      if (pendingFolder) {
+        parentStack.push(pendingFolder);
+        pendingFolder = null;
+      } else {
+        parentStack.push(parentStack[parentStack.length - 1]);
+      }
+      continue;
+    }
+
+    if (upper.startsWith('</DL')) {
+      if (parentStack.length > 1) {
+        parentStack.pop();
+      }
+      lastBookmark = null;
+      lastFolder = parentStack[parentStack.length - 1] ?? null;
+      pendingFolder = null;
+      continue;
+    }
+  }
+
+  return root.children;
+};
 
 export default function BookmarkApp() {
   const [user, setUser] = useState<User | null>(null);
@@ -36,6 +344,21 @@ export default function BookmarkApp() {
   const [preselectedCollectionId, setPreselectedCollectionId] = useState<string | undefined>();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [collectionToDelete, setCollectionToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [statusModal, setStatusModal] = useState<StatusModalState | null>(null);
+
+  const showStatusModal = (config: Omit<StatusModalState, 'variant'> & { variant?: StatusVariant }) => {
+    setStatusModal({
+      title: config.title,
+      message: config.message,
+      variant: config.variant || 'info',
+      confirmText: config.confirmText
+    });
+  };
+
+  const closeStatusModal = () => setStatusModal(null);
 
   useEffect(() => onAuthStateChanged(auth, setUser), []);
 
@@ -167,7 +490,7 @@ export default function BookmarkApp() {
       description: data.description,
       color: data.color,
       parentId: data.parentId || null,
-      icon: '📁',
+      icon: DEFAULT_COLLECTION_ICON,
       owner: user.uid,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -234,6 +557,151 @@ export default function BookmarkApp() {
       updatedAt: serverTimestamp()
     });
   }
+
+  const handleExportHtml = () => {
+    if (!user) {
+      showStatusModal({
+        title: 'Inicia sesión para exportar',
+        message: 'Conéctate con tu cuenta para descargar tus colecciones y links.',
+        variant: 'info'
+      });
+      return;
+    }
+    if (!bookmarks.length && !collections.length) {
+      showStatusModal({
+        title: 'Sin contenido para exportar',
+        message: 'Crea al menos una colección o link antes de generar el archivo HTML.',
+        variant: 'info'
+      });
+      return;
+    }
+    setShowUserMenu(false);
+    setIsExporting(true);
+    try {
+      const html = generateNetscapeHtml(bookmarks, collections);
+      const blob = new Blob([html], { type: 'text/html;charset=UTF-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const dateStamp = new Date().toISOString().split('T')[0];
+      link.href = url;
+      link.download = `bookmarks_${dateStamp}.html`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error al exportar marcadores', error);
+      showStatusModal({
+        title: 'No pudimos generar el archivo',
+        message: 'Intenta nuevamente o refresca la página antes de exportar.',
+        variant: 'error'
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const triggerHtmlImport = () => {
+    if (!user) {
+      showStatusModal({
+        title: 'Inicia sesión para importar',
+        message: 'Conéctate con tu cuenta para traer tus colecciones desde HTML.',
+        variant: 'info'
+      });
+      return;
+    }
+    setShowUserMenu(false);
+    fileInputRef.current?.click();
+  };
+
+  const handleHtmlFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) {
+      if (event.target) {
+        event.target.value = '';
+      }
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const content = await file.text();
+      const parsedNodes = parseNetscapeBookmarks(content);
+      if (!parsedNodes.length) {
+        throw new Error('Archivo sin estructura NETSCAPE');
+      }
+
+      const stats = { collections: 0, bookmarks: 0 };
+      let colorCursor = 0;
+      const nextColor = () => {
+        const color = COLLECTION_COLORS[colorCursor % COLLECTION_COLORS.length];
+        colorCursor += 1;
+        return color;
+      };
+
+      const persistNodes = async (nodes: ParsedNode[], parentId?: string | null) => {
+        for (const nodeItem of nodes) {
+          if (nodeItem.type === 'folder') {
+            const collectionRef = await addDoc(collection(db, `users/${user.uid}/collections`), {
+              name: nodeItem.title || 'Colección sin nombre',
+              description: nodeItem.description || '',
+              color: nextColor(),
+              parentId: parentId || null,
+              icon: DEFAULT_COLLECTION_ICON,
+              owner: user.uid,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            });
+            stats.collections += 1;
+            await persistNodes(nodeItem.children, collectionRef.id);
+          } else {
+            try {
+              const urlObj = new URL(nodeItem.url);
+              const screenshotUrl = `https://image.thum.io/get/width/800/crop/600/${encodeURIComponent(nodeItem.url)}`;
+              const faviconUrl = nodeItem.icon || `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`;
+              await addDoc(collection(db, `users/${user.uid}/bookmarks`), {
+                url: nodeItem.url,
+                title: nodeItem.title || nodeItem.url,
+                description: nodeItem.description || '',
+                faviconUrl,
+                screenshotUrl,
+                screenshotPath: '',
+                tags: [],
+                collectionId: parentId || null,
+                pinned: false,
+                lang: navigator.language?.slice(0, 2) || 'es',
+                owner: user.uid,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
+              });
+              stats.bookmarks += 1;
+            } catch (bookmarkError) {
+              console.warn('Marcador omitido por URL inválida', nodeItem.url, bookmarkError);
+            }
+          }
+        }
+      };
+
+      await persistNodes(parsedNodes, null);
+      showStatusModal({
+        title: 'Importación completada',
+        message: `Se agregaron ${stats.collections} colecciones y ${stats.bookmarks} links desde el archivo.`,
+        variant: 'success'
+      });
+    } catch (error) {
+      console.error('Error al importar HTML', error);
+      showStatusModal({
+        title: 'No se pudo importar el archivo',
+        message: 'Revisa que el HTML siga el formato de ejemplo o vuelve a intentarlo.',
+        variant: 'error'
+      });
+    } finally {
+      setIsImporting(false);
+      if (event.target) {
+        event.target.value = '';
+      }
+    }
+  };
 
   function handleOpenEdit(bookmark: Bookmark) {
     setEditingBookmark(bookmark);
@@ -316,6 +784,13 @@ export default function BookmarkApp() {
 
   return (
     <div className="flex min-h-screen w-full bg-gradient-to-br from-blue-600 via-purple-600 to-blue-700 text-zinc-100">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".html,text/html"
+        className="hidden"
+        onChange={handleHtmlFileChange}
+      />
       {/* Sidebar */}
       <Sidebar
         collections={collections}
@@ -441,6 +916,27 @@ export default function BookmarkApp() {
                       <p className="text-xs text-zinc-500 truncate">{user?.email}</p>
                     </div>
                     <div className="py-1">
+                      <button
+                        onClick={triggerHtmlImport}
+                        disabled={isImporting}
+                        className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+                        </svg>
+                        {isImporting ? 'Importando...' : 'Importar HTML'}
+                      </button>
+                      <button
+                        onClick={handleExportHtml}
+                        disabled={isExporting}
+                        className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5m0 0l5 5m-5-5v16" />
+                        </svg>
+                        {isExporting ? 'Generando...' : 'Exportar HTML'}
+                      </button>
+                      <div className="border-t border-zinc-800 my-1" />
                       <button
                         onClick={() => { signOut(auth); setShowUserMenu(false); }}
                         className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 transition-colors flex items-center gap-2"
@@ -1106,6 +1602,15 @@ export default function BookmarkApp() {
         confirmText="Delete"
         cancelText="Cancel"
         isDangerous={true}
+      />
+
+      <FeedbackModal
+        isOpen={!!statusModal}
+        onClose={closeStatusModal}
+        title={statusModal?.title || ''}
+        message={statusModal?.message || ''}
+        variant={statusModal?.variant}
+        confirmText={statusModal?.confirmText}
       />
 
       {/* Mobile Sidebar Overlay */}
