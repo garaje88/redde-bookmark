@@ -726,7 +726,7 @@ export default function BookmarkApp() {
     if (!user || !editingBookmark) return;
 
     const urlObj = new URL(data.url);
-    const screenshotUrl = `https://image.thum.io/get/width/800/crop/600/${encodeURIComponent(data.url)}`;
+    const screenshotUrl = `https://image.thum.io/get/width/800/crop/600/${data.url}`;
 
     await updateDoc(doc(db, `users/${user.uid}/bookmarks`, editingBookmark.id), {
       url: data.url,

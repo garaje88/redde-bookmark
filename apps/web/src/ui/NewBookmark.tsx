@@ -3,6 +3,8 @@ import { auth, db } from '../firebase';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 // import { httpsCallable, getFunctions } from 'firebase/functions'; // si usas fetchMetadata
 
+const FALLBACK_IMAGE = '/trace.svg';
+
 export default function NewBookmark({ url="" }: { url?: string }) {
   const [value, setValue] = useState(url);
   const [meta, setMeta] = useState<any>(null);
@@ -50,7 +52,17 @@ export default function NewBookmark({ url="" }: { url?: string }) {
       <input className="border rounded px-3 py-2 w-full" value={value} onChange={e=>setValue(e.target.value)} placeholder="https://..." />
       {loading ? <div>Cargando…</div> : meta && (
         <div className="flex items-start gap-3">
-          {meta.faviconUrl && <img src={meta.faviconUrl} width={16} height={16} />}
+          {meta.faviconUrl && (
+            <img
+              src={meta.faviconUrl}
+              width={16}
+              height={16}
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = FALLBACK_IMAGE;
+              }}
+            />
+          )}
           <div>
             <div className="font-semibold">{meta.title}</div>
             {meta.description && <div className="text-sm opacity-80">{meta.description}</div>}

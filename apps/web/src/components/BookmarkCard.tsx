@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Bookmark } from '../types';
 
 interface BookmarkCardProps {
@@ -7,8 +8,11 @@ interface BookmarkCardProps {
   onEdit?: (bookmark: Bookmark) => void;
 }
 
+const FALLBACK_IMAGE = '/trace.svg';
+
 export default function BookmarkCard({ bookmark, onDelete, onPin, onEdit }: BookmarkCardProps) {
   const { id, url, title, description, faviconUrl, screenshotUrl, tags, pinned, createdAt, collectionId } = bookmark;
+  const [isScreenshotBroken, setIsScreenshotBroken] = useState(false);
 
   const formatDate = (timestamp: any) => {
     if (!timestamp) return '';
@@ -25,6 +29,7 @@ export default function BookmarkCard({ bookmark, onDelete, onPin, onEdit }: Book
   };
 
   const getScreenshot = () => {
+    if (isScreenshotBroken) return FALLBACK_IMAGE;
     if (screenshotUrl) return screenshotUrl;
     // Usar favicon grande como fallback, o generar con thum.io
     if (url) {
@@ -33,10 +38,10 @@ export default function BookmarkCard({ bookmark, onDelete, onPin, onEdit }: Book
         // Usar el servicio de screenshot como fallback
         return `https://image.thum.io/get/width/800/crop/600/${encodeURIComponent(url)}`;
       } catch {
-        return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjI1MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjI1MCIgZmlsbD0iIzI3MjcyNyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0ic3lzdGVtLXVpIiBmb250LXNpemU9IjI0IiBmaWxsPSIjNjY2NjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIj5ObyBQcmV2aWV3PC90ZXh0Pjwvc3ZnPg==';
+        return FALLBACK_IMAGE;
       }
     }
-    return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjI1MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjI1MCIgZmlsbD0iIzI3MjcyNyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0ic3lzdGVtLXVpIiBmb250LXNpemU9IjI0IiBmaWxsPSIjNjY2NjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIj5ObyBQcmV2aWV3PC90ZXh0Pjwvc3ZnPg==';
+    return FALLBACK_IMAGE;
   };
 
   return (
@@ -49,6 +54,11 @@ export default function BookmarkCard({ bookmark, onDelete, onPin, onEdit }: Book
             alt={title || url}
             className="w-full h-full object-cover"
             loading="lazy"
+            onError={() => {
+              if (!isScreenshotBroken) {
+                setIsScreenshotBroken(true);
+              }
+            }}
           />
           {/* Gradient overlay */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
@@ -74,7 +84,9 @@ export default function BookmarkCard({ bookmark, onDelete, onPin, onEdit }: Book
                 alt=""
                 className="w-4 h-4 mt-0.5 flex-shrink-0"
                 onError={(e) => {
-                  e.currentTarget.style.display = 'none';
+                  e.currentTarget.onerror = null;
+                  e.currentTarget.src = FALLBACK_IMAGE;
+                  e.currentTarget.classList.add('opacity-70');
                 }}
               />
             ) : null}
