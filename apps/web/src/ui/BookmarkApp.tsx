@@ -35,6 +35,11 @@ const COLLECTION_COLORS = [
 const DEFAULT_COLLECTION_ICON = '\u{1F4C1}';
 const UNCATEGORIZED_COLLECTION_ID = '__uncategorized__';
 const INBOX_COLLECTION_ID = 'inbox';
+const COLUMN_BASE_WIDTHS: Record<number, number> = {
+  0: 288, // ~w-72
+  1: 288,
+  2: 288
+};
 const NETSCAPE_ROOT_TITLE = 'Marcadores';
 const NETSCAPE_HEADER = [
   '<!DOCTYPE NETSCAPE-Bookmark-file-1>',
@@ -353,6 +358,13 @@ export default function BookmarkApp() {
   const [isExporting, setIsExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [statusModal, setStatusModal] = useState<StatusModalState | null>(null);
+  const [columnWidths, setColumnWidths] = useState<Record<number, number>>({
+    0: COLUMN_BASE_WIDTHS[0],
+    1: COLUMN_BASE_WIDTHS[1],
+    2: COLUMN_BASE_WIDTHS[2]
+  });
+  const [resizingLevel, setResizingLevel] = useState<number | null>(null);
+  const resizeStartRef = useRef({ startX: 0, startWidth: 0 });
 
   const showStatusModal = (config: Omit<StatusModalState, 'variant'> & { variant?: StatusVariant }) => {
     setStatusModal({
@@ -366,6 +378,30 @@ export default function BookmarkApp() {
   const closeStatusModal = () => setStatusModal(null);
 
   useEffect(() => onAuthStateChanged(auth, setUser), []);
+
+  useEffect(() => {
+    if (resizingLevel === null) return;
+    const handleMouseMove = (event: MouseEvent) => {
+      const { startX, startWidth } = resizeStartRef.current;
+      const delta = event.clientX - startX;
+      const baseWidth = COLUMN_BASE_WIDTHS[resizingLevel] || COLUMN_BASE_WIDTHS[0];
+      const maxWidth = baseWidth * 1.4;
+      const nextWidth = Math.max(baseWidth, Math.min(startWidth + delta, maxWidth));
+      setColumnWidths((prev) => ({
+        ...prev,
+        [resizingLevel]: nextWidth
+      }));
+    };
+    const handleMouseUp = () => {
+      setResizingLevel(null);
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingLevel]);
 
   const unassignedBookmarks = useMemo(
     () => bookmarks.filter(isUnassignedBookmark),
@@ -566,6 +602,13 @@ export default function BookmarkApp() {
       return b.collectionId === selectedCollection.id;
     });
   }, [bookmarks, selectedCollection?.id, isVirtualCollection]);
+  const handleResizeStart = (level: number, event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const baseWidth = COLUMN_BASE_WIDTHS[level] || COLUMN_BASE_WIDTHS[0];
+    const currentWidth = columnWidths[level] || baseWidth;
+    resizeStartRef.current = { startX: event.clientX, startWidth: currentWidth };
+    setResizingLevel(level);
+  };
 
   const columnViewportHeight = 'calc(100vh - 220px)';
 
@@ -1212,7 +1255,7 @@ export default function BookmarkApp() {
                     Colecciones
                   </div>
                   <p className="text-sm text-zinc-500">
-                    Navega {collections.length} colecciones por niveles y encuentra rapidamente sus enlaces.
+                    Navega {rootCollections.length} colecciones por niveles y encuentra rapidamente sus enlaces.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1243,20 +1286,25 @@ export default function BookmarkApp() {
                 </div>
               </div>
 
-              {collections.length > 0 ? (
+              {rootCollections.length > 0 ? (
                 <div className="flex gap-4 overflow-x-auto pb-4">
-                  {collectionColumns.map((column) => (
-                    <div
-                      key={`${column.level}-${column.parentId || 'root'}`}
-                      className="flex-shrink-0 w-64 lg:w-72 bg-[rgba(8,8,11,0.85)] border border-zinc-900/40 shadow-[0_15px_40px_rgba(0,0,0,0.35)] rounded-3xl p-4 flex flex-col"
-                      style={{ height: columnViewportHeight, maxHeight: columnViewportHeight }}
-                    >
-                      <div className="text-xs uppercase tracking-[0.35em] text-zinc-500 mb-3">
-                        {getColumnTitle(column.level)}
-                      </div>
-                      <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-                        {column.items.length > 0 ? (
-                          column.items.map((collection) => {
+                  {collectionColumns.map((column) => {
+                    if (column.level > 0 && column.items.length === 0) {
+                      return null;
+                    }
+                    const columnWidth = columnWidths[column.level] || COLUMN_BASE_WIDTHS[column.level] || COLUMN_BASE_WIDTHS[0];
+                    return (
+                      <div
+                        key={`${column.level}-${column.parentId || 'root'}`}
+                        className="relative flex-shrink-0 bg-[rgba(8,8,11,0.85)] border border-zinc-900/40 shadow-[0_15px_40px_rgba(0,0,0,0.35)] rounded-3xl p-4 flex flex-col"
+                        style={{ height: columnViewportHeight, maxHeight: columnViewportHeight, width: columnWidth }}
+                      >
+                        <div className="text-xs uppercase tracking-[0.35em] text-zinc-500 mb-3">
+                          {getColumnTitle(column.level)}
+                        </div>
+                        <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                          {column.items.length > 0 ? (
+                            column.items.map((collection) => {
                             const isSelected = column.selectedId === collection.id;
                             const childCount = childCountByCollection[collection.id] || 0;
                             const bookmarkCount = collectionCounts[collection.id] || 0;
@@ -1303,19 +1351,28 @@ export default function BookmarkApp() {
                                 </svg>
                               </button>
                             );
-                          })
-                        ) : (
-                          <div className="h-full flex items-center justify-center text-center text-xs text-zinc-500 border border-dashed border-zinc-800/60 rounded-2xl px-3 py-6">
-                            {column.level === 0 ? 'No hay colecciones principales todavia' : 'Sin colecciones hijas'}
-                          </div>
-                        )}
+                          })) : (
+                            column.level === 0 ? (
+                              <div className="h-full flex items-center justify-center text-center text-xs text-zinc-500 border border-dashed border-zinc-800/60 rounded-2xl px-3 py-6">
+                                No hay colecciones principales todavia
+                              </div>
+                            ) : null
+                          )}
+                        </div>
+                        <div
+                          role="presentation"
+                          onMouseDown={(event) => handleResizeStart(column.level, event)}
+                          className="absolute top-0 right-0 w-2 h-full cursor-ew-resize flex items-center justify-center select-none"
+                        >
+                          <div className="w-0.5 h-12 bg-zinc-700/60 rounded-full" />
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
 
                   {selectedCollection && (
                     <div
-                      className="flex-shrink-0 w-72 bg-[rgba(8,8,11,0.9)] border border-zinc-900/40 shadow-[0_15px_40px_rgba(0,0,0,0.35)] rounded-3xl p-4 flex flex-col"
+                      className="flex-shrink-0 w-85 bg-[rgba(8,8,11,0.9)] border border-zinc-900/40 shadow-[0_15px_40px_rgba(0,0,0,0.35)] rounded-3xl p-4 flex flex-col"
                       style={{ height: columnViewportHeight, maxHeight: columnViewportHeight }}
                     >
                       <div className="flex items-start justify-between gap-3 mb-4">
