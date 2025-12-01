@@ -347,7 +347,7 @@ export default function BookmarkApp() {
   const [showFabMenu, setShowFabMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
-  const [activeView, setActiveView] = useState<'home' | 'links' | 'pinned' | 'collection' | 'collections'>('home');
+  const [activeView, setActiveView] = useState<'home' | 'links' | 'pinned' | 'collection' | 'collections'>('collections');
   const [activeCollection, setActiveCollection] = useState<string | undefined>();
   const [activeTag, setActiveTag] = useState<string | undefined>();
   const [collectionPath, setCollectionPath] = useState<string[]>([]);
@@ -1466,15 +1466,37 @@ export default function BookmarkApp() {
                               }}
                               className="w-full flex items-center gap-3 px-3 py-2 rounded-2xl border border-transparent bg-zinc-900/60 hover:border-purple-500/40 hover:bg-zinc-900 transition-all text-left"
                             >
-                              <div className="w-7 h-7 rounded-xl bg-zinc-800/80 flex items-center justify-center text-purple-300">
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l4-4a4 4 0 015.656-5.656l-1.1 1.1" />
-                                </svg>
+                              <div className="w-7 h-7 rounded-xl bg-zinc-800/80 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                                {bookmark.faviconUrl ? (
+                                  <img
+                                    src={bookmark.faviconUrl}
+                                    alt=""
+                                    className="w-4 h-4 object-contain"
+                                    onError={(e) => {
+                                      e.currentTarget.style.display = 'none';
+                                      const parent = e.currentTarget.parentElement;
+                                      if (parent) {
+                                        parent.innerHTML = `<svg class="w-4 h-4 text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l4-4a4 4 0 015.656-5.656l-1.1 1.1" /></svg>`;
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <svg className="w-4 h-4 text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l4-4a4 4 0 015.656-5.656l-1.1 1.1" />
+                                  </svg>
+                                )}
                               </div>
                               <div className="min-w-0 flex-1">
                                 <p className="text-sm font-medium text-white truncate">{bookmark.title || bookmark.url}</p>
                                 <p className="text-xs text-zinc-500 truncate">
-                                  {bookmark.url.replace(/^https?:\/\//, '')}
+                                  {(() => {
+                                    try {
+                                      const urlObj = new URL(bookmark.url);
+                                      return urlObj.hostname;
+                                    } catch {
+                                      return bookmark.url.replace(/^https?:\/\//, '').split('/')[0];
+                                    }
+                                  })()}
                                 </p>
                               </div>
                               <svg className="w-4 h-4 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
